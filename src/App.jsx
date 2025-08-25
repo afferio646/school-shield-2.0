@@ -866,8 +866,8 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
             <h1 className="text-3xl font-bold text-center">IQ Risk Assessment Center</h1>
             
             <div className="flex justify-center gap-2 mb-4">
-                <button onClick={() => handleScenarioButtonClick('parentComplaint')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'parentComplaint' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Parent Complaint Scenario</button>
-                <button onClick={() => handleScenarioButtonClick('facultyLeave')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'facultyLeave' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Faculty Leave Scenario</button>
+                <button onClick={() => handleScenarioButtonClick('parentComplaint')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'parentComplaint' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Parent Complaint Demo</button>
+                <button onClick={() => handleScenarioButtonClick('facultyLeave')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'facultyLeave' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Faculty Leave Demo</button>
             </div>
 
             <div className="shadow-2xl border-2 border-blue-100 rounded-2xl" style={{ background: "#4B5C64" }}>

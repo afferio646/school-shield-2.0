@@ -1,10 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bell, BookOpen, Shield, AlertCircle, TrendingUp, MessageCircle, Gavel, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
+import { Bell, BookOpen, Shield, AlertCircle, TrendingUp, MessageCircle, Gavel, ChevronLeft, ChevronRight, Calendar, X, Archive, ExternalLink } from "lucide-react";
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from 'firebase/firestore';
 
-// --- SECURE API KEY HANDLING ---
-// The key is now read from a secure environment variable on Vercel.
-// To use the preview here, you still need to paste your key.
-const GEMINI_API_KEY = (window.VITE_GEMINI_API_KEY) || "AIzaSyCYAfKVJ9BTLWHpNLDr0bHDsvYOdWMfIpw";
+
+// --- SECURE API KEY & CONFIG HANDLING ---
+// This code is now ready for deployment. It will prioritize environment variables 
+// on Vercel but falls back to the hardcoded keys for use in this preview environment.
+const GEMINI_API_KEY = (typeof process !== 'undefined' ? process.env.REACT_APP_GEMINI_API_KEY : undefined) || "AIzaSyCYAfKVJ9BTLWHpNLDr0bHDsvYOdWMfIpw";
+const FIREBASE_CONFIG = (typeof process !== 'undefined' ? process.env.REACT_APP_FIREBASE_CONFIG : undefined) || window.__firebase_config;
 
 
 // --- Helper Components ---
@@ -38,7 +43,69 @@ function ExpandableOption({ title, children }) {
     );
 }
 
-function AIContentRenderer({ content }) {
+// --- NEW: Handbook Section Link Component ---
+function SectionLink({ number, onLinkClick, children }) {
+    return (
+        <button 
+            className="text-blue-300 underline hover:text-blue-200 font-bold focus:outline-none inline"
+            onClick={(e) => {
+                e.stopPropagation(); // Prevent parent click events
+                onLinkClick(number);
+            }}
+        >
+            {children || `Section ${number}`}
+        </button>
+    );
+}
+
+// --- CORRECTED: AIContentRenderer with fixed link generation ---
+function AIContentRenderer({ content, onSectionLinkClick }) {
+    const renderTextWithLinks = (text) => {
+        if (typeof text !== 'string') return text;
+
+        const sectionRegex = /(Section\s\d+(?:\.\d+)?)/;
+        const caseLawRegex = /(\*[^*]+\sv\.\s[^*]+\*)/;
+        const boldRegex = /(\*\*.*?\*\*)/;
+        
+        // CORRECTED: Removed the extra capturing group around the combined regex
+        const combinedRegex = new RegExp(`${sectionRegex.source}|${caseLawRegex.source}|${boldRegex.source}`, 'g');
+        
+        const parts = text.split(combinedRegex).filter(Boolean);
+
+        return parts.map((part, i) => {
+            if (/^Section\s\d+(?:\.\d+)?$/.test(part)) {
+                const sectionNumber = part.match(/(\d+(\.\d+)?)/)[0];
+                return (
+                    <SectionLink key={i} number={sectionNumber} onLinkClick={onSectionLinkClick}>
+                        {part}
+                    </SectionLink>
+                );
+            }
+            if (/^\*[^*]+\sv\.\s[^*]+\*$/.test(part)) {
+                const caseName = part.slice(1, -1);
+                return (
+                    <span key={i} className="inline-flex items-center gap-2">
+                        <em className="font-semibold">{caseName}</em>
+                        <a
+                            href={`https://www.google.com/search?q=${encodeURIComponent(caseName)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-2 py-0.5 rounded-md text-xs inline-flex items-center gap-1"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <ExternalLink size={12} />
+                            View Source
+                        </a>
+                    </span>
+                );
+            }
+            if (/^\*\*.*?\*\*$/.test(part)) {
+                 return <strong key={i} className="text-[#faecc4]">{part.slice(2, -2)}</strong>;
+            }
+            return <span key={i}>{part}</span>;
+        });
+    };
+
     if (!content) return null;
 
     if (Array.isArray(content)) {
@@ -46,8 +113,8 @@ function AIContentRenderer({ content }) {
             return (
                 <div className="text-white space-y-2">
                     {content.map((item, index) => (
-                        <p key={index}>
-                            <strong className="text-[#faecc4]">{item.header}</strong> {item.text}
+                        <p key={index} className="whitespace-pre-line">
+                            <strong className="text-[#faecc4]">{item.header}</strong> {renderTextWithLinks(item.text)}
                         </p>
                     ))}
                 </div>
@@ -57,14 +124,10 @@ function AIContentRenderer({ content }) {
         return (
             <div className="text-white space-y-2">
                 {content.map((item, index) => {
-                    const parts = String(item).split(/(\*\*.*?\*\*)/g).filter(Boolean);
+                    if (React.isValidElement(item)) return React.cloneElement(item, { key: index, onLinkClick });
                     return (
                         <p key={index}>
-                            {parts.map((part, i) =>
-                                part.startsWith('**') && part.endsWith('**') ?
-                                <strong key={i} className="text-[#faecc4]">{part.slice(2, -2)}</strong> :
-                                <span key={i}>{part}</span>
-                            )}
+                           {renderTextWithLinks(String(item))}
                         </p>
                     );
                 })}
@@ -77,11 +140,11 @@ function AIContentRenderer({ content }) {
             return (
                 <div className="space-y-4">
                     <div>
-                        <AIContentRenderer content={content.recommendationSummary} />
+                        <AIContentRenderer content={content.recommendationSummary} onSectionLinkClick={onSectionLinkClick} />
                     </div>
                     <div className="border-t border-gray-600 pt-4">
                         <h4 className="font-bold text-lg text-[#faecc4] mb-2">Implementation Steps:</h4>
-                        <AIContentRenderer content={content.implementationSteps} />
+                        <AIContentRenderer content={content.implementationSteps} onSectionLinkClick={onSectionLinkClick} />
                     </div>
                 </div>
             );
@@ -101,7 +164,7 @@ function AIContentRenderer({ content }) {
                                         <div key={prop} className="mt-2">
                                             <strong className="text-[#faecc4]">{formattedProp}:</strong>
                                             <div className="mt-1 p-3 border border-dashed border-gray-500 rounded-md bg-gray-800 italic whitespace-pre-line">
-                                                {String(val)}
+                                                {renderTextWithLinks(String(val))}
                                             </div>
                                         </div>
                                     );
@@ -109,7 +172,7 @@ function AIContentRenderer({ content }) {
 
                                 return (
                                     <p key={prop}>
-                                        <strong>{formattedProp}:</strong> <span>{String(val)}</span>
+                                        <strong>{formattedProp}:</strong> <span>{renderTextWithLinks(String(val))}</span>
                                     </p>
                                 );
                            })}
@@ -121,21 +184,17 @@ function AIContentRenderer({ content }) {
     }
     
     if (React.isValidElement(content)) {
-        return content;
+        return React.cloneElement(content, { onLinkClick });
     }
 
     const lines = String(content).split('\n').filter(line => line.trim() !== '');
     return (
         <div className="text-white space-y-2">
             {lines.map((line, index) => {
-                const parts = line.split(/(\*\*.*?\*\*)/g).filter(Boolean);
+                 if (React.isValidElement(line)) return React.cloneElement(line, { key: index, onLinkClick });
                 return (
                     <p key={index}>
-                        {parts.map((part, i) => 
-                            part.startsWith('**') && part.endsWith('**') ? 
-                            <strong key={i} className="text-[#faecc4]">{part.slice(2, -2)}</strong> : 
-                            <span key={i}>{part}</span>
-                        )}
+                       {renderTextWithLinks(line)}
                     </p>
                 );
             })}
@@ -143,9 +202,30 @@ function AIContentRenderer({ content }) {
     );
 }
 
+// --- NEW: Handbook Section Modal ---
+function HandbookSectionModal({ section, onClose }) {
+    if (!section) return null;
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60 p-4">
+            <div className="bg-gray-800 p-6 rounded-2xl shadow-2xl max-w-3xl w-full text-white border-2 border-blue-400">
+                <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-600">
+                    <h2 className="text-xl font-bold text-[#faecc4]">{section.title}</h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white">
+                        <X size={24} />
+                    </button>
+                </div>
+                <div className="max-h-[70vh] overflow-y-auto pr-4 text-gray-200 whitespace-pre-line">
+                    {section.content}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 
 // --- Handbook Vulnerabilities Card Component ---
-function HandbookVulnerabilitiesCard({ sections }) {
+function HandbookVulnerabilitiesCard({ sections, onSectionLinkClick }) {
     const [isVulnerabilitiesRevealed, setIsVulnerabilitiesRevealed] = useState(false);
     const [isMonitoringSystemRevealed, setIsMonitoringSystemRevealed] = useState(false);
 
@@ -185,7 +265,7 @@ function HandbookVulnerabilitiesCard({ sections }) {
                     <div className="mt-4 text-white border-t border-gray-500 pt-4">
                         <b>All Identified Vulnerabilities by Section:</b>
                         <ul className="list-disc ml-5 mt-2 space-y-1 text-base">
-                            {sections.map((section, idx) =>
+                            {sections(onSectionLinkClick).map((section, idx) =>
                                 section.vulnerabilities.length > 0 ? (
                                     <li key={idx} className="mb-1">
                                         <b>{section.section}:</b>
@@ -340,10 +420,10 @@ function HandbookAuditCard() {
 }
 
 // --- Report Viewer Modal Component ---
-function ReportViewerModal({ report, scenarios, onClose }) {
+function ReportViewerModal({ report, scenarios, onClose, onSectionLinkClick }) {
     if (!report) return null;
 
-    const reportData = scenarios[report.scenarioKey];
+    const reportData = scenarios(onSectionLinkClick)[report.scenarioKey];
 
     const StepDetail = ({ title, stepKey, children }) => (
         <div className="p-4 border border-gray-600 rounded-lg bg-gray-800 mb-4">
@@ -377,7 +457,7 @@ function ReportViewerModal({ report, scenarios, onClose }) {
                         </div>
                         {Object.keys(reportData).filter(k => k.startsWith('step')).map(stepKey => (
                             <StepDetail key={stepKey} stepKey={stepKey} title={reportData[stepKey].title}>
-                                <AIContentRenderer content={reportData[stepKey].content} />
+                                <AIContentRenderer content={reportData[stepKey].content} onSectionLinkClick={onSectionLinkClick} />
                             </StepDetail>
                         ))}
                     </div>
@@ -426,12 +506,13 @@ function ArchivedReportsCard({ reports, onViewReport }) {
 // --- Page Components ---
 
 // --- Risk Assessment & Mitigation Center Component --- //
-function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
+function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, onSectionLinkClick, queryHistory, setQueryHistory, db, userId }) {
     const [issue, setIssue] = useState("");
     const [responseGenerated, setResponseGenerated] = useState(false);
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState('form'); // 'form', 'demo', 'live'
     const [selectedScenarioKey, setSelectedScenarioKey] = useState(null);
+    const [openSteps, setOpenSteps] = useState({}); // NEW: State for open steps
     const [archivedReports, setArchivedReports] = useState([
         {
             id: 1,
@@ -452,7 +533,8 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
     const [generatedSteps, setGeneratedSteps] = useState(null);
     const [fallbackMessage, setFallbackMessage] = useState("");
 
-    const scenarios = {
+    // Scenarios are now a function to accept the onSectionLinkClick handler
+    const scenarios = (onSectionLinkClick) => ({
         parentComplaint: {
             step1: { title: "Classify the Issue", content: [
                 { header: "Issue Type:", text: "Parent Complaint" },
@@ -460,16 +542,16 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
                 { header: "Stakeholders:", text: "Parent, Student, Faculty, Admin Team" }
             ]},
             step2: { title: "Match Handbook & Policies", content: [
-                { header: "Relevant Section:", text: "Section 4.3 – Student Discipline Procedure" },
-                { header: "Text Excerpt:", text: "\"Disciplinary action may be taken in the best interest of the school community. Parents will be contacted as appropriate.\"" },
+                { header: "Relevant Section:", text: <><SectionLink number="3.4" onLinkClick={onSectionLinkClick} /> – Disciplinary Action Policy</> },
+                { header: "Full Section Language:", text: handbookSectionLanguage["3. The Employment Relationship"] },
                 { header: "Policy Gap:", text: "No clear mandate about timing of parental notification. No explicit appeal process defined." }
             ]},
             step3: { title: "Initial Risk Assessment", content: [
                 { header: "Risk Tier:", text: "Moderate" },
                 { header: "Justification:", text: "Policy ambiguity + use of legal language by parent (e.g. “violates rights”). High potential for reputational or legal escalation without documentation." }
             ]},
-            step4: { title: "Administrator Response Options", content: <> <ExpandableOption title="Option A – Supportive & Investigative"> <p>“We are actively reviewing this matter to ensure all disciplinary steps align with our handbook. We appreciate your patience and will provide a full review soon.”</p> <p><strong>Policy Match:</strong> Section 4.3 – Student Discipline Procedure</p> <p><strong>Risk Score:</strong> Low</p> <p><strong>Legal Reference:</strong> In Smith v. Westbrook Charter (2020), courts emphasized that prompt review and acknowledgment of parental concerns significantly reduced liability exposure.</p> <p><strong>Recommendation:</strong> Proceed. No legal escalation needed.</p> </ExpandableOption> <ExpandableOption title="Option B – Procedural + Soft Acknowledgment"> <p>“Our current disciplinary policy allows administrative discretion. While no violation occurred, we recognize communication could be improved.”</p> <p><strong>Policy Match:</strong> Section 4.3 – Student Discipline Procedure</p> <p><strong>Risk Score:</strong> Moderate</p> <p><strong>Legal Reference:</strong> In Mason v. Eastside Prep (2021), ambiguity in school policy and failure to proactively address parent concerns resulted in the issue escalating to the board and gaining media attention.</p> <p><strong>Recommendation:</strong> Use cautiously. Consider offering a follow-up to reduce friction.</p> </ExpandableOption> <ExpandableOption title="Option C – Firm & Final"> <p>“The suspension followed established policy and is final. No further action is required by the school.”</p> <p><strong>Policy Match:</strong> Section 4.3 – General Interpretation</p> <p><strong>Risk Score:</strong> High</p> <p><strong>Legal Reference:</strong> In Parent v. Beacon Hill Christian (2020), a rigid response without acknowledgment of parental concern resulted in negative publicity and a costly settlement due to failure to follow communication best practices.</p> <p><strong>Recommendation:</strong> Not advised. May escalate tensions and introduce legal or reputational risk.</p> </ExpandableOption> </> },
-            step5: { title: "Projected Complainant Reactions", content: <> <ExpandableOption title="Option A"> <p><strong>Likely Response:</strong> Parent appreciates the acknowledgment and feels heard. May request a brief meeting for clarity, but escalation is unlikely.</p> <p><strong>School Risk:</strong> Low – Positive tone and willingness to investigate usually results in resolution without further action.</p> <p><strong>Legal Reference:</strong> Doe v. Heritage Academy (2019) – School protected after showing procedural review in response to parental concern.</p> </ExpandableOption> <ExpandableOption title="Option B"> <p><strong>Likely Response:</strong> Parent feels partially heard but remains concerned. May request documentation or a policy review meeting. Possible follow-up to school board.</p> <p><strong>School Risk:</strong> Moderate – While language is neutral, absence of apology or proactive follow-up could be perceived as dismissive. Reputation risk increases with repeat complaints.</p> <p><strong>Legal Reference:</strong> Mason v. Eastside Prep (2021) – Lack of communication clarity contributed to prolonged parent conflict and board involvement.</p> </ExpandableOption> <ExpandableOption title="Option C"> <p><strong>Likely Response:</strong> Parent views this as stonewalling. Likely to escalate to school board or external legal advisory. May take issue to social media or local press, claiming rights were ignored.</p> <p><strong>School Risk:</strong> High – This tone invites resistance, lacks empathy, and contradicts best practices for early-stage resolution. Serious PR and legal exposure possible.</p> <p><strong>Legal Reference:</strong> Parent v. Beacon Hill Christian (2020) – Firm denial without engagement led to settlement due to public backlash and lack of documentation.</p> </ExpandableOption> </> },
+            step4: { title: "Administrator Response Options", content: <> <ExpandableOption title="Option A – Supportive & Investigative"> <p>“We are actively reviewing this matter to ensure all disciplinary steps align with our handbook. We appreciate your patience and will provide a full review soon.”</p> <p><strong>Policy Match:</strong> <SectionLink number="3.4" onLinkClick={onSectionLinkClick} /> – Disciplinary Action Policy</p> <p><strong>Risk Score:</strong> Low</p> <p><strong>Legal Reference:</strong> *Smith v. Westbrook Charter (2020)*, courts emphasized that prompt review and acknowledgment of parental concerns significantly reduced liability exposure.</p> <p><strong>Recommendation:</strong> Proceed. No legal escalation needed.</p> </ExpandableOption> <ExpandableOption title="Option B – Procedural + Soft Acknowledgment"> <p>“Our current disciplinary policy allows administrative discretion. While no violation occurred, we recognize communication could be improved.”</p> <p><strong>Policy Match:</strong> <SectionLink number="3.4" onLinkClick={onSectionLinkClick} /> – Disciplinary Action Policy</p> <p><strong>Risk Score:</strong> Moderate</p> <p><strong>Legal Reference:</strong> *Mason v. Eastside Prep (2021)*, ambiguity in school policy and failure to proactively address parent concerns resulted in the issue escalating to the board and gaining media attention.</p> <p><strong>Recommendation:</strong> Use cautiously. Consider offering a follow-up to reduce friction.</p> </ExpandableOption> <ExpandableOption title="Option C – Firm & Final"> <p>“The suspension followed established policy and is final. No further action is required by the school.”</p> <p><strong>Policy Match:</strong> <SectionLink number="3.4" onLinkClick={onSectionLinkClick} /> – General Interpretation</p> <p><strong>Risk Score:</strong> High</p> <p><strong>Legal Reference:</strong> *Parent v. Beacon Hill Christian (2020)*, a rigid response without acknowledgment of parental concern resulted in negative publicity and a costly settlement due to failure to follow communication best practices.</p> <p><strong>Recommendation:</strong> Not advised. May escalate tensions and introduce legal or reputational risk.</p> </ExpandableOption> </> },
+            step5: { title: "Projected Complainant Reactions", content: <> <ExpandableOption title="Option A"> <p><strong>Likely Response:</strong> Parent appreciates the acknowledgment and feels heard. May request a brief meeting for clarity, but escalation is unlikely.</p> <p><strong>School Risk:</strong> Low – Positive tone and willingness to investigate usually results in resolution without further action.</p> <p><strong>Legal Reference:</strong> *Doe v. Heritage Academy (2019)* – School protected after showing procedural review in response to parental concern.</p> </ExpandableOption> <ExpandableOption title="Option B"> <p><strong>Likely Response:</strong> Parent feels partially heard but remains concerned. May request documentation or a policy review meeting. Possible follow-up to school board.</p> <p><strong>School Risk:</strong> Moderate – While language is neutral, absence of apology or proactive follow-up could be perceived as dismissive. Reputation risk increases with repeat complaints.</p> <p><strong>Legal Reference:</strong> *Mason v. Eastside Prep (2021)* – Lack of communication clarity contributed to prolonged parent conflict and board involvement.</p> </ExpandableOption> <ExpandableOption title="Option C"> <p><strong>Likely Response:</strong> Parent views this as stonewalling. Likely to escalate to school board or external legal advisory. May take issue to social media or local press, claiming rights were ignored.</p> <p><strong>School Risk:</strong> High – This tone invites resistance, lacks empathy, and contradicts best practices for early-stage resolution. Serious PR and legal exposure possible.</p> <p><strong>Legal Reference:</strong> *Parent v. Beacon Hill Christian (2020)* – Firm denial without engagement led to settlement due to public backlash and lack of documentation.</p> </ExpandableOption> </> },
             step6: { 
                 title: "Final Recommendation & Action Plan", 
                 content: {
@@ -479,7 +561,7 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
                         "2. **Investigate:** Interview all relevant staff and review any documentation related to the suspension.",
                         "3. **Document:** Create a timeline of events and a summary of findings from the investigation.",
                         "4. **Communicate:** Schedule a follow-up meeting with the parent to discuss the findings and the school's position.",
-                        "5. **Policy Review:** Flag the 'Student Discipline Procedure' for the next handbook review to add clarity regarding parental notification timelines."
+                        "5. **Policy Review:** Flag the 'Disciplinary Action Policy' for the next handbook review to add clarity regarding parental notification timelines."
                     ]
                 }
             }
@@ -491,15 +573,15 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
                 { header: "Stakeholders:", text: "Faculty Member, Head of School, Director of Finance/HR." }
             ]},
             step2: { title: "Match Handbook & Policies", content: [
-                { header: "Relevant Sections:", text: "5.7 (Leave from Work), 5.6 (Vacation Time), 4.3 (Separation from Employment)" },
-                { header: "Text Excerpts:", text: "\"Faculty members are not entitled to vacation time.\" \"Employees will not be paid for any unused sick leave upon termination or retirement...\" \"Included in the definition of sick leave are absences for reasons clearly beyond the control of the employee: personal illness, illness or death of an immediate family member...\"" },
+                { header: "Relevant Sections:", text: <><SectionLink number="4" onLinkClick={onSectionLinkClick}>Section 4</SectionLink> – Compensation Policies & <SectionLink number="5" onLinkClick={onSectionLinkClick}>Section 5</SectionLink> – Employee Benefit Programs</> },
+                { header: "Full Section Language:", text: `--- SECTION 4: COMPENSATION POLICIES ---\n${handbookSectionLanguage["4. Compensation Policies"]}\n\n--- SECTION 5: EMPLOYEE BENEFIT PROGRAMS ---\n${handbookSectionLanguage["5. Employee Benefit Programs"]}` },
                 { header: "Policy Clarity:", text: "The policy is clear. Sick leave is for specific, approved reasons and is not a cash benefit or interchangeable with vacation, which faculty do not receive." }
             ]},
             step3: { title: "Initial Risk Assessment", content: [
                 { header: "Risk Tier:", text: "Low to Moderate" },
                 { header: "Justification:", text: "The policy is clear, reducing legal risk. However, the employee is being non-renewed, creating a sensitive situation. A poorly handled response could lead to a baseless wrongful termination claim or negative sentiment. The risk is primarily in relationship management." }
             ]},
-            step4: { title: "Administrator Response Options", content: <> <ExpandableOption title="Option A – Firm, Policy-Based, & Supportive"> <p>“Thank you for your inquiry. Per our employee handbook (Section 5.7), sick leave is designated for illness and other specified emergencies and is not convertible to vacation time. Additionally, the handbook states that unused sick leave is not paid out upon separation. We can, however, schedule a meeting to discuss your final pay and benefits transition to ensure a smooth departure.”</p> <p><strong>Policy Match:</strong> Section 5.7, 4.3</p> <p><strong>Risk Score:</strong> Low</p> <p><strong>Legal Reference:</strong> Cites *Johnson v. Independent School District No. 4*, where courts upheld an employer's right to enforce clear, written leave policies, especially when distinguishing between sick and vacation leave. Emphasizes the importance of consistent policy application.</p> <p><strong>Recommendation:</strong> Proceed. This is the most direct and legally sound approach.</p> </ExpandableOption> <ExpandableOption title="Option B – Accommodating / Exception-Based"> <p>“While our policy doesn't typically allow for this, we can make an exception in this case and allow you to use a portion of your sick leave before your departure.”</p> <p><strong>Policy Match:</strong> N/A - Contradicts policy</p> <p><strong>Risk Score:</strong> High</p> <p><strong>Legal Reference:</strong> Cites *Davis v. Charter School Partners*, where making an exception for one employee created a precedent that the school was later forced to honor for others, leading to significant unplanned costs. Inconsistent policy application creates risk of discrimination claims.</p> <p><strong>Recommendation:</strong> Not advised. Creates a dangerous precedent and undermines the handbook.</p> </ExpandableOption> <ExpandableOption title="Option C – Vague & Deferring"> <p>“We will need to review your request with the business office and will get back to you at a later date.”</p> <p><strong>Policy Match:</strong> N/A</p> <p><strong>Risk Score:</strong> Moderate</p> <p><strong>Legal Reference:</strong> In *Chen v. Academy of Arts*, delaying a clear answer on a separation-related matter was interpreted as evasive, increasing employee frustration and contributing to a constructive discharge claim (though ultimately unsuccessful, it was costly to defend).</p> <p><strong>Recommendation:</strong> Not advised. Delays a clear answer and can create false hope, leading to more frustration.</p> </ExpandableOption> </> },
+            step4: { title: "Administrator Response Options", content: <> <ExpandableOption title="Option A – Firm, Policy-Based, & Supportive"> <p>“Thank you for your inquiry. Per our employee handbook (<SectionLink number="5" onLinkClick={onSectionLinkClick}>Section 5</SectionLink>), sick leave is designated for illness and other specified emergencies and is not convertible to vacation time. Additionally, the handbook states that unused sick leave is not paid out upon separation (<SectionLink number="4.3" onLinkClick={onSectionLinkClick} />). We can, however, schedule a meeting to discuss your final pay and benefits transition to ensure a smooth departure.”</p> <p><strong>Policy Match:</strong> <SectionLink number="4.3" onLinkClick={onSectionLinkClick} />, <SectionLink number="5" onLinkClick={onSectionLinkClick}>Section 5</SectionLink></p> <p><strong>Risk Score:</strong> Low</p> <p><strong>Legal Reference:</strong> *Johnson v. Independent School District No. 4*, where courts upheld an employer's right to enforce clear, written leave policies, especially when distinguishing between sick and vacation leave. Emphasizes the importance of consistent policy application.</p> <p><strong>Recommendation:</strong> Proceed. This is the most direct and legally sound approach.</p> </ExpandableOption> <ExpandableOption title="Option B – Accommodating / Exception-Based"> <p>“While our policy doesn't typically allow for this, we can make an exception in this case and allow you to use a portion of your sick leave before your departure.”</p> <p><strong>Policy Match:</strong> N/A - Contradicts policy</p> <p><strong>Risk Score:</strong> High</p> <p><strong>Legal Reference:</strong> *Davis v. Charter School Partners*, where making an exception for one employee created a precedent that the school was later forced to honor for others, leading to significant unplanned costs. Inconsistent policy application creates risk of discrimination claims.</p> <p><strong>Recommendation:</strong> Not advised. Creates a dangerous precedent and undermines the handbook.</p> </ExpandableOption> <ExpandableOption title="Option C – Vague & Deferring"> <p>“We will need to review your request with the business office and will get back to you at a later date.”</p> <p><strong>Policy Match:</strong> N/A</p> <p><strong>Risk Score:</strong> Moderate</p> <p><strong>Legal Reference:</strong> In *Chen v. Academy of Arts*, delaying a clear answer on a separation-related matter was interpreted as evasive, increasing employee frustration and contributing to a constructive discharge claim (though ultimately unsuccessful, it was costly to defend).</p> <p><strong>Recommendation:</strong> Not advised. Delays a clear answer and can create false hope, leading to more frustration.</p> </ExpandableOption> </> },
             step5: { title: "Projected Complainant Reactions", content: <> <ExpandableOption title="Option A"> <p><strong>Likely Response:</strong> Employee may be disappointed but understands the decision is based on established policy, not personal animus. Escalation is unlikely as the policy is clear.</p> <p><strong>School Risk:</strong> Low – The decision is defensible and based on consistent application of written policy.</p> </ExpandableOption> <ExpandableOption title="Option B"> <p><strong>Likely Response:</strong> Employee is satisfied. However, this may create morale issues with other staff who were not granted similar exceptions. Sets a precedent for future requests upon separation.</p> <p><strong>School Risk:</strong> High – Future employees could claim discrimination if not offered the same benefit, undermining the handbook.</p> </ExpandableOption> <ExpandableOption title="Option C"> <p><strong>Likely Response:</strong> Employee becomes anxious and frustrated by the delay. May begin to feel they are being treated unfairly, increasing the likelihood of consulting legal counsel or complaining to other staff.</p> <p><strong>School Risk:</strong> Moderate – The ambiguity and delay can be perceived as weakness or unfair treatment, potentially escalating the situation.</p> </ExpandableOption> </> },
             step6: { 
                 title: "Final Recommendation & Action Plan", 
@@ -514,29 +596,47 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
                 }
             }
         }
-    };
+    });
 
     const handleScenarioButtonClick = (scenarioKey) => {
         const issueText = archivedReports.find(r => r.scenarioKey === scenarioKey)?.issue || '';
         setIssue(issueText);
+        setResponseGenerated(false); // Clear previous results
+        setGeneratedSteps(null);
+        setOpenSteps({}); // Reset open steps
         setViewMode('demo');
         setSelectedScenarioKey(scenarioKey);
     };
     
-    const handleGenerate = async () => {
+    const handleGenerate = async (isUpdate = false) => {
         if (!issue) return;
         
         setLoading(true);
-        setResponseGenerated(false);
-        setGeneratedSteps(null);
+        if (!isUpdate) { // Only clear for a brand new analysis
+            setResponseGenerated(false);
+            setGeneratedSteps(null);
+            setOpenSteps({}); // Reset open steps
+        }
         setFallbackMessage("");
 
-        // Artificial 10-second delay for demo purposes
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        // NEW: Save query to history if it's a new, non-demo query
+        if (viewMode === 'live' && !queryHistory.includes(issue) && db && userId) {
+            try {
+                const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
+                await addDoc(collection(db, `artifacts/${appId}/users/${userId}/queries`), {
+                    text: issue,
+                    timestamp: serverTimestamp()
+                });
+            } catch (error) {
+                console.error("Error saving query to Firestore: ", error);
+            }
+        }
 
         if (viewMode === 'demo') {
-            if (selectedScenarioKey && scenarios[selectedScenarioKey]) {
-                setGeneratedSteps(scenarios[selectedScenarioKey]);
+             // Artificial delay for demo
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            if (selectedScenarioKey && scenarios(onSectionLinkClick)[selectedScenarioKey]) {
+                setGeneratedSteps(scenarios(onSectionLinkClick)[selectedScenarioKey]);
             } else {
                 setGeneratedSteps({ error: "Could not find a matching demo scenario." });
             }
@@ -547,7 +647,7 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
 
         // Live AI Call
         setViewMode('live');
-        if (!apiKey || apiKey === "PASTE_YOUR_API_KEY_HERE") {
+        if (!apiKey) {
             alert("Please provide an API key to use the live AI features.");
             setLoading(false);
             return;
@@ -558,15 +658,15 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
         const prompt = `
             Role: You are an expert K-12 risk assessment analyst and legal advisor. Your function is to analyze a scenario and populate a JSON object based on provided source materials. Your tone is professional, clear, and authoritative. Your analysis must be robust and detailed, mirroring the complexity of a real-world legal and administrative consultation for a school leader.
             Task: Read the User-Provided Scenario and the Source Materials. Populate a JSON object that strictly follows the provided schema.
-            Formatting & Content Rules:
+            CRITICAL RULES:
             1.  Your entire response MUST be only the populated JSON object. No other text.
-            2.  The 'title' property for each step should be the plain title (e.g., "Classify the Issue").
-            3.  Derive answers, especially for Step 2 & 4, directly from the Source Materials.
-            4.  For 'legalReference' in Steps 4 and 5, you must provide not only a plausible case name (e.g., *Smith v. Westbrook Charter (2020)*) but also a detailed sentence explaining why that case is relevant to the specific option being discussed. This is non-negotiable.
-            5.  For 'suggestedLanguage' in Step 4, you MUST provide a full, robust paragraph of professional language suitable for a Head of School to use in an email or conversation. Do not use single sentences.
+            2.  For 'legalReference' in Steps 4 and 5, you MUST provide real, verifiable court cases relevant to the educational or employment context. For each case, provide the name in italics (e.g., *Tinker v. Des Moines Indep. Cmty. Sch. Dist.*) and a concise sentence explaining its relevance to the specific option being discussed. THIS IS NON-NEGOTIABLE.
+            3.  For 'suggestedLanguage' in Step 4, you MUST provide a full, robust paragraph of professional language suitable for a Head of School to use. Do not use single sentences.
+            4.  The output must be as detailed and robust as a professional consultant's report. Do not use placeholder text. Every field must be filled with comprehensive, scenario-specific information.
+            5.  When referencing a handbook policy, use the format "Section X.Y". The user interface will automatically link this text.
             6.  **For Steps 1, 2, 3:** The 'content' MUST be an array of objects, each with a 'header' key (e.g., "Issue Type:") and a 'text' key (e.g., "Parent Complaint").
             7.  **For Step 4 & 5:** The 'content' must be an object with keys "optionA", "optionB", "optionC". Each option must be an object with its own title and various text properties. The projected reactions in Step 5 must be nuanced and explain potential consequences.
-            8.  **For Step 6:** The 'recommendationSummary' MUST be a string formatted with bolded headers like this: "**Recommended Option:** [Option]\n**Why:** [Explanation]\n**Confidence Level:** [Level]\n**Legal Review Advised:** [Yes/No and when]". The 'implementationSteps' MUST be a clear, actionable checklist as an array of strings, with each string being a complete sentence for a single step, prefixed with its number (e.g., "1. Do this first.").
+            8.  **For Step 6:** The 'recommendationSummary' MUST be a string formatted with bolded headers like this: "**Recommended Option:** [Option]\\n**Why:** [Explanation]\\n**Confidence Level:** [Level]\\n**Legal Review Advised:** [Yes/No and when]". The 'implementationSteps' MUST be a clear, actionable checklist as an array of strings, with each string being a complete sentence for a single step, prefixed with its number (e.g., "1. Do this first.").
             --- START OF SOURCE MATERIALS ---
             ${sourceMaterials}
             --- END OF SOURCE MATERIALS ---
@@ -650,7 +750,7 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
             if (response.status === 503) {
                 setFallbackMessage("The live AI model is temporarily unavailable. Displaying a pre-built demonstration scenario.");
                 const scenarioKey = 'parentComplaint'; // Default fallback
-                setGeneratedSteps(scenarios[scenarioKey]);
+                setGeneratedSteps(scenarios(onSectionLinkClick)[scenarioKey]);
                 setViewMode('demo');
                 setResponseGenerated(true);
                 return;
@@ -679,19 +779,32 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
         }
     };
 
+    // NEW: Handler for toggling steps
+    const handleStepToggle = (stepKey) => {
+        setOpenSteps(prev => ({ ...prev, [stepKey]: !prev[stepKey] }));
+    };
+    
+    // UPDATED: Close analysis handler
+    const handleCloseAnalysis = () => {
+        setResponseGenerated(false);
+        setGeneratedSteps(null);
+        setIssue("");
+        setSelectedScenarioKey(null);
+        setOpenSteps({});
+    };
+
     // This component is used for the live AI-generated response
-    function StepCard({ title, stepKey, children }) {
-        const [isOpen, setIsOpen] = useState(false);
+    function StepCard({ title, stepKey, children, isOpen, onToggle }) {
         const [isAnalyzing, setIsAnalyzing] = useState(false);
 
         const handleToggle = () => {
             if (isOpen) {
-                setIsOpen(false);
+                onToggle();
             } else {
                 setIsAnalyzing(true);
                 setTimeout(() => {
                     setIsAnalyzing(false);
-                    setIsOpen(true);
+                    onToggle();
                 }, 750); 
             }
         };
@@ -710,7 +823,7 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
                         
                         {isOpen && (
                              <div className="border-t border-gray-600 pt-4">
-                                 <AIContentRenderer content={children} />
+                                 <AIContentRenderer content={children} onSectionLinkClick={onSectionLinkClick} />
                                  {stepKey === 'step6' && (
                                      <div className="border-t border-gray-600 mt-6 pt-6"> 
                                          <h3 className="text-lg font-semibold text-[#faecc4] mb-2 flex items-center"><Gavel className="w-5 h-5 mr-2"/>Get Direct Legal Help</h3> 
@@ -745,11 +858,12 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
         setFallbackMessage("");
         setViewMode('form');
         setSelectedScenarioKey(null);
+        setOpenSteps({});
     }, []);
 
     return (
         <div className="p-6 space-y-6 max-w-6xl mx-auto text-base">
-            <h1 className="text-3xl font-bold text-center">Incident Risk Assessment & Mitigation System</h1>
+            <h1 className="text-3xl font-bold text-center">IQ Risk Assessment Center</h1>
             
             <div className="flex justify-center gap-2 mb-4">
                 <button onClick={() => handleScenarioButtonClick('parentComplaint')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'parentComplaint' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Parent Complaint Scenario</button>
@@ -774,13 +888,56 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
                             setViewMode('live');
                         }}
                     />
-                    <div className="flex justify-center">
+                    {/* --- NEW: Query History Dropdown --- */}
+                    {queryHistory.length > 0 && (
+                        <div className="mt-2">
+                             <label className="block font-medium text-sm mb-1">Saved Queries</label>
+                             <select
+                                className="w-full p-2 rounded-md text-black border-2 border-gray-300"
+                                onChange={(e) => {
+                                    if(e.target.value) {
+                                        setIssue(e.target.value);
+                                        setResponseGenerated(false);
+                                        setGeneratedSteps(null);
+                                        setOpenSteps({});
+                                        setViewMode('live');
+                                        setSelectedScenarioKey(null);
+                                    }
+                                }}
+                                value="" // Controlled component needs a value, empty string for placeholder
+                             >
+                                <option value="">Select a past query to load...</option>
+                                {queryHistory.map((q, i) => (
+                                    <option key={i} value={q}>{q.substring(0, 100)}{q.length > 100 ? '...' : ''}</option>
+                                ))}
+                             </select>
+                        </div>
+                    )}
+
+                    {/* --- UPDATED: Button Group --- */}
+                    <div className="flex justify-center gap-4 mt-4">
+                        {responseGenerated ? (
+                            <button
+                                onClick={handleCloseAnalysis}
+                                className="px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md bg-red-600 hover:bg-red-700"
+                            >
+                                Close
+                            </button>
+                        ) : (
+                            <button
+                                onClick={() => handleGenerate(false)}
+                                disabled={loading || !issue}
+                                className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
+                            >
+                                {loading ? "Analyzing..." : "Analyze New Issue"}
+                            </button>
+                        )}
                         <button
-                            onClick={responseGenerated ? () => { setResponseGenerated(false); setIssue(""); setSelectedScenarioKey(null); } : handleGenerate}
-                            disabled={loading || !issue}
-                            className={`mt-4 px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
+                            onClick={() => handleGenerate(true)}
+                            disabled={loading || !issue || !responseGenerated}
+                            className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue || !responseGenerated ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}
                         >
-                            {loading ? "Generating..." : (responseGenerated ? "Close Analysis" : "Get Full Risk & Response Analysis")}
+                             {loading ? "Analyzing..." : "Update & Analyze"}
                         </button>
                     </div>
                 </div>
@@ -803,7 +960,13 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
                     ) : (
                         Object.keys(generatedSteps).map((stepKey) => (
                             generatedSteps[stepKey] && generatedSteps[stepKey].title && (
-                                <StepCard key={stepKey} stepKey={stepKey} title={generatedSteps[stepKey].title}>
+                                <StepCard 
+                                    key={stepKey} 
+                                    stepKey={stepKey} 
+                                    title={generatedSteps[stepKey].title}
+                                    isOpen={!!openSteps[stepKey]}
+                                    onToggle={() => handleStepToggle(stepKey)}
+                                >
                                     {generatedSteps[stepKey].content}
                                 </StepCard>
                             )
@@ -814,7 +977,7 @@ function RiskAssessmentCenter({ handbookText, handbookIndex, apiKey }) {
 
 
             <ArchivedReportsCard reports={archivedReports} onViewReport={setViewedReport} />
-            {viewedReport && <ReportViewerModal report={viewedReport} scenarios={scenarios} onClose={() => setViewedReport(null)} />}
+            {viewedReport && <ReportViewerModal report={viewedReport} scenarios={scenarios} onClose={() => setViewedReport(null)} onSectionLinkClick={onSectionLinkClick} />}
         </div>
     );
 }
@@ -962,6 +1125,10 @@ export default function App() {
     const suggestionSectionRef = useRef("");
     const [selectedSection, setSelectedSection] = useState("1. Introduction");
     const [isSectionLanguageOpen, setIsSectionLanguageOpen] = useState(false);
+    const [modalSection, setModalSection] = useState(null); // NEW state for the section modal
+    const [queryHistory, setQueryHistory] = useState([]); // NEW: Lifted state for persistent history
+    const [db, setDb] = useState(null);
+    const [userId, setUserId] = useState(null);
 
     // Q&A State
     const [hosQaQuestion, setHosQaQuestion] = useState("");
@@ -980,41 +1147,95 @@ export default function App() {
     const [handbookTopicResults, setHandbookTopicResults] = useState(null);
     const [isAnalyzingTopic, setIsAnalyzingTopic] = useState(false);
 
-    // Note: Firebase functionality is disabled in this preview environment.
-    // The code is structured correctly for deployment where config would be injected.
+    // --- NEW: Firebase Setup and Query History Persistence ---
+    useEffect(() => {
+        try {
+            const firebaseConfig = JSON.parse(FIREBASE_CONFIG || '{}');
+            if (!firebaseConfig.apiKey) {
+                console.error("Firebase config is missing or invalid.");
+                return;
+            }
+            const app = initializeApp(firebaseConfig);
+            const firestoreDb = getFirestore(app);
+            const firebaseAuth = getAuth(app);
+            setDb(firestoreDb);
+
+            const unsubscribeAuth = onAuthStateChanged(firebaseAuth, async (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                } else {
+                    try {
+                        const initialToken = window.__initial_auth_token;
+                        if (initialToken) {
+                            const userCredential = await signInWithCustomToken(firebaseAuth, initialToken);
+                            setUserId(userCredential.user.uid);
+                        } else {
+                            const userCredential = await signInAnonymously(firebaseAuth);
+                            setUserId(userCredential.user.uid);
+                        }
+                    } catch (error) {
+                        console.error("Error signing in:", error);
+                    }
+                }
+            });
+            return () => unsubscribeAuth();
+        } catch (e) {
+            console.error("Firebase config not found or invalid. Persistence will be disabled.", e);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (db && userId) {
+            const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
+            const q = query(collection(db, `artifacts/${appId}/users/${userId}/queries`), orderBy("timestamp", "desc"));
+            
+            const unsubscribe = onSnapshot(q, (querySnapshot) => {
+                const history = [];
+                querySnapshot.forEach((doc) => {
+                    history.push(doc.data().text);
+                });
+                
+                const archivedIssues = [
+                    "Parent complaint about unfair suspension without notice",
+                    "Non-renewed faculty member wants to use sick days as vacation before departure."
+                ];
+                const combinedHistory = [...archivedIssues, ...history];
+                const uniqueHistory = [...new Set(combinedHistory)];
+
+                setQueryHistory(uniqueHistory);
+            });
+
+            return () => unsubscribe();
+        }
+    }, [db, userId]);
 
     // --- Data and Constants ---
     const SIDEBAR_LINKS = [
         { key: "dashboard", label: "Dashboard", icon: <Shield className="w-5 h-5" /> },
-        { key: "risk", label: "Risk Assessment Center", icon: <AlertCircle className="w-5 h-5" /> },
-        { key: "handbook", label: "Handbook", icon: <BookOpen className="w-5 h-5" /> },
-        { key: "alerts", label: "Alerts", icon: <Bell className="w-5 h-5" /> },
-        { key: "trends", label: "Industry Trends", icon: <TrendingUp className="w-5 h-5" /> },
-        { key: "hosqa", label: "School Leaders Q&A", icon: <MessageCircle className="w-5 h-5" /> },
-        { key: "legal", label: "Legal Guidance", icon: <Gavel className="w-5 h-5" /> }
+        { key: "risk", label: "IQ Risk Assessment Center", icon: <AlertCircle className="w-5 h-5" /> },
+        { key: "handbook", label: "IQ Handbook", icon: <BookOpen className="w-5 h-5" /> },
+        { key: "calendar", label: "Calendar", icon: <Calendar className="w-5 h-5" /> },
+        { key: "alerts", label: "IQ Alerts", icon: <Bell className="w-5 h-5" /> },
+        { key: "trends", label: "IQ Trends", icon: <TrendingUp className="w-5 h-5" /> },
+        { key: "hosqa", label: "IQ School Leaders Q&A", icon: <MessageCircle className="w-5 h-5" /> },
+        { key: "legal", label: "IQ Legal Guidance", icon: <Gavel className="w-5 h-5" /> }
     ];
 
     const SCHOOL_LOGO = "https://i.ytimg.com/vi/wNI9LjpwVDU/maxresdefault.jpg";
 
+    // --- UPDATED: Alerts and Trends with AI-identified items and live links ---
     const alerts = [
-        { text: "New law on volunteer screening", date: "2025-07-21", hasButton: true },
+        { text: "New Dept. of Ed guidance on 'Equitable Services' for private schools under Title I.", date: "2025-08-21", link: "https://www.ed.gov/about/news/press-release/us-department-of-education-issues-equitable-service-school-choice-guidance" },
+        { text: "Federal tax credit scholarship program passes Senate, impacting school choice funding.", date: "2025-07-01", link: "https://www.the74million.org/article/big-tax-bill-passes-senate-with-less-beautiful-plan-for-national-school-choice/" },
         { text: "Policy update on bullying resolved", date: "2025-07-17" },
         { text: "Incident on field trip", date: "2025-07-15" },
     ];
 
     const trends = [
-        { text: "Pending Title IX update in Congress", date: "2025-07-20", hasButton: true },
+        { text: "Data indicates a slowdown in the post-pandemic private school enrollment boom.", date: "2025-07-28", link: "https://www.cato.org/survey-reports/survey-is-private-school-enrollment-boom-ending" },
+        { text: "AI integration for personalized learning and security becoming a key focus for K-12.", date: "2025-01-10", link: "https://edtechmagazine.com/k12/article/2025/01/ai-trends-ed-tech-watch-2025" },
         { text: "State law on faculty licensure changed", date: "2025-07-17", hasButton: true },
         { text: "Cyberbullying legislation signed", date: "2025-07-13" },
-    ];
-
-    const handbookSections = [
-        { section: "1. Introduction", vulnerabilities: [{ text: "The 'at-will' statement is present but could be more prominent to ensure it's not missed.", source: "Legal Best Practice", date: "2025-08-20" }] },
-        { section: "2. Equal Employment Opportunity Policies and Procedures", vulnerabilities: [{ text: "Missing an explicit, anonymous reporting channel for harassment complaints, which is an emerging best practice.", source: "Industry Trend", date: "2025-06-22" }] },
-        { section: "3. The Employment Relationship", vulnerabilities: [{ text: "The Background Check policy (3.2) should specify that findings will be considered in accordance with the Fair Credit Reporting Act (FCRA).", source: "Handbook Audit", date: "2025-08-20" }]},
-        { section: "4. Compensation Policies", vulnerabilities: [] },
-        { section: "5. Employee Benefit Programs", vulnerabilities: [] },
-        { section: "6. Code of Conduct", vulnerabilities: [{ text: "The Student-Employee Relationship policy (6.3) needs explicit rules regarding social media interaction (friending, following, direct messaging).", source: "Handbook Audit", date: "2025-07-02" }] },
     ];
 
     const handbookSectionLanguage = {
@@ -1025,6 +1246,37 @@ export default function App() {
         "5. Employee Benefit Programs": `5.1 Benefit Eligibility\nTS offers a variety of benefit programs to eligible employees, many of which are generally described below. Every effort has been made to ensure the accuracy of the benefits information in this handbook. However, if any inconsistency exists between this handbook and the written plans, policies, or contracts, the actual provisions of each benefit plan will govern. TS reserves the right to amend or terminate any of its benefit plans at any time, in whole or in part, for any reason. \n\n5.2 Summary of Employee Benefits\nGroup Health Insurance, Employer Matching Retirement Plan, Flexible Spending Benefits/Pre-Tax Reimbursements, Life Insurance, Early Retirement Health Benefits, Continuation of Benefits (COBRA), Worker’s Compensation, Unemployment Compensation, Tuition Payments via Payroll Deduction, Advanced Degree Reimbursement.\n\n5.3 Financial Assistance for Faculty/Staff Tuition and Fees\nTuition Remission, Financial Tuition Assistance, Faculty/Student Trips, Faculty/Staff Extended Day Care Services.\n\n5.4 Holidays\nTS observes the following holidays: New Year’s Day, Martin Luther King, Jr. Birthday, Good Friday (p.m.), Memorial Day, Fourth of July, Labor Day, Wednesday before Thanksgiving, Thanksgiving, Friday after Thanksgiving, Christmas Eve, Christmas Day, New Year’s Eve. \n\n5.5 Remote Work\nRemote work is neither a benefit nor an entitlement and in no way changes the terms and conditions of employment. The employee remains obligated to comply with all School rules, policies, practices, and instructions that would apply if the employee were working at the regular School worksite. \n\n5.6 Vacation Time (Non-Instructional Employees Only)\nTwelve month, full-time employees are allowed two weeks paid vacation per year following one year of service from hire date. After 10 years of employment, vacation time is increased to three weeks per year. Non-instructional staff members who work less than twelve months are not entitled to paid vacation.`,
         "6. Code of Conduct": `6.1 Employee Code of Business Conduct and Ethics\nThe School has adopted this Code of Business Conduct and Ethics (the “Code”) applicable to all employees. It is intended to work in conjunction with the Policy on Conflicts of Interest signed by senior administrators, key employees and members of the Board of Trustees (the “Conflict of Interest Policy”). To the extent there is any conflict between the Conflict of Interest Policy and the Code, the Conflict of Interest Policy shall control. \n\n6.2 Employee Dress Code\nIn order to create and maintain an environment as conducive as possible to the attainment of the educational objectives of the school, all employees shall adhere to a reasonable standard of dress and personal grooming. Employees are expected to present a professional image in appearance and dress at all times while performing TS business. \n\n6.3 Student - Employee Relationship \nAs employees of an educational institution, faculty and staff are held to a higher standard by parents, students, colleagues, and members of the public. The school supports and endorses a strict policy of respect toward students and expects employees to act at all times as adult role models. \n\n6.4 Smoking and Drugs\nTS is a smoke-free, tobacco-free environment. This applies to everyone – students, administrators, faculty, staff, contractors, vendors, service personnel, and guests. TS prohibits the use of all tobacco products, including smokeless tobacco and “vapor” devices, on campus and in school vehicles with no exceptions. \n\n6.5 Violence Free Workplace\nTS prohibits possession of guns, firearms, knives, archery-type devices, stun guns, objects capable of firing a projectile, or martial arts devices on TS’s property, including the school’s parking lot.`,
     };
+    
+    // --- NEW: Helper function to find a handbook section by its number (e.g., "3.2") ---
+    const findSectionByNumber = (numberStr) => {
+        if (!numberStr) return null;
+        const mainSectionNumber = numberStr.split('.')[0];
+        const sectionTitle = Object.keys(handbookSectionLanguage).find(key => key.startsWith(mainSectionNumber + '.'));
+        
+        if (sectionTitle) {
+            return { title: sectionTitle, content: handbookSectionLanguage[sectionTitle] };
+        }
+        return null;
+    };
+
+    // --- NEW: Handler to open the section modal ---
+    const handleSectionLinkClick = (sectionNumber) => {
+        const sectionData = findSectionByNumber(sectionNumber);
+        if (sectionData) {
+            setModalSection(sectionData);
+        } else {
+            console.warn(`Could not find handbook section for number: ${sectionNumber}`);
+        }
+    };
+
+    const handbookSections = (onSectionLinkClick) => [
+        { section: "1. Introduction", vulnerabilities: [{ text: "The 'at-will' statement is present but could be more prominent to ensure it's not missed.", source: "Legal Best Practice", date: "2025-08-20" }] },
+        { section: "2. Equal Employment Opportunity Policies and Procedures", vulnerabilities: [{ text: "Missing an explicit, anonymous reporting channel for harassment complaints, which is an emerging best practice.", source: "Industry Trend", date: "2025-06-22" }] },
+        { section: "3. The Employment Relationship", vulnerabilities: [{ text: <span>The Background Check policy (<SectionLink number="3.2" onLinkClick={onSectionLinkClick} />) should specify that findings will be considered in accordance with the Fair Credit Reporting Act (FCRA).</span>, source: "Handbook Audit", date: "2025-08-20" }]},
+        { section: "4. Compensation Policies", vulnerabilities: [] },
+        { section: "5. Employee Benefit Programs", vulnerabilities: [] },
+        { section: "6. Code of Conduct", vulnerabilities: [{ text: <span>The Student-Employee Relationship policy (<SectionLink number="6.3" onLinkClick={onSectionLinkClick} />) needs explicit rules regarding social media interaction (friending, following, direct messaging).</span>, source: "Handbook Audit", date: "2025-07-02" }] },
+    ];
 
     const fullHandbookText = Object.values(handbookSectionLanguage).join("\n\n");
     
@@ -1044,9 +1296,9 @@ export default function App() {
     // --- Modal Handler ---
     const handleShowSuggestion = (item) => {
         const suggestionMap = {
-            "New law on volunteer screening": "Update Section 3.2 (Background Checks) to incorporate new state requirements for volunteer screening procedures, including frequency and scope of checks.",
-            "Pending Title IX update in Congress": "Review and prepare draft updates for Section 2.4 (Non-Discrimination and Harassment) to align with anticipated changes to Title IX regulations.",
-            "Cyberbullying legislation signed": "Update Section 6.3 (Student - Employee Relationship) and Section 8.3 (Technology Acceptable Use Policy) to include specific language addressing cyberbullying and digital citizenship."
+            "New law on volunteer screening": <span>Update <SectionLink number="3.2" onLinkClick={handleSectionLinkClick} /> (Background Checks) to incorporate new state requirements for volunteer screening procedures, including frequency and scope of checks.</span>,
+            "Pending Title IX update in Congress": <span>Review and prepare draft updates for <SectionLink number="2.4" onLinkClick={handleSectionLinkClick} /> (Non-Discrimination and Harassment) to align with anticipated changes to Title IX regulations.</span>,
+            "Cyberbullying legislation signed": <span>Update <SectionLink number="6.3" onLinkClick={handleSectionLinkClick} /> (Student - Employee Relationship) and add a Technology Acceptable Use Policy to include specific language addressing cyberbullying and digital citizenship.</span>
         };
         const defaultSuggestion = `Based on the topic "${item.text}", consider updating the relevant handbook section.`;
         
@@ -1057,16 +1309,16 @@ export default function App() {
 
     const handleHosQaSubmit = async () => {
         const questionText = hosQaQuestion;
-        if (!questionText || !GEMINI_API_KEY || GEMINI_API_KEY === "PASTE_YOUR_API_KEY_HERE") {
-             alert("Please provide an API key to use the live AI features.");
-            return;
-        }
+        if (!questionText) return;
+        
         setSubmittedQuestion(questionText);
         setIsAnalyzing(true);
         setCurrentAnswer(null);
         setHosQaQuestion("");
 
-        const prompt = `As an expert on school administration, answer the following question: "${questionText}". Format the response as a JSON object with a single key "answer" which is an array of objects. Each object must have a "header" key (a short, bolded topic like "Policy Development:") and a "text" key (the detailed explanation).`;
+        const prompt = `As an expert on school administration, answer the following question for a Head of School. Your response must be detailed, actionable, and professionally formatted. Where appropriate, reference specific laws (e.g., FERPA, IDEA, Title IX), regulations, or established best practices. Format the response as a JSON object with a single key "answer" which is an array of objects. Each object must have a "header" key (a short, bolded topic like "Policy Development:") and a "text" key (the detailed explanation).
+
+Question: "${questionText}"`;
 
         const hosQaSchema = {
             type: "OBJECT",
@@ -1148,17 +1400,21 @@ export default function App() {
 
     const handleLegalQaSubmit = async () => {
         const questionText = legalQuestion;
-        if (!questionText || !GEMINI_API_KEY || GEMINI_API_KEY === "PASTE_YOUR_API_KEY_HERE") {
-            alert("Please provide an API key to use the live AI features.");
-            return;
-        }
+        if (!questionText) return;
 
         setSubmittedLegalQuestion(questionText);
         setIsAnalyzingLegal(true);
         setLegalAnswer(null);
         setLegalQuestion("");
 
-        const prompt = `Analyze the following legal question for a school administrator: "${questionText}". Format your response as a JSON object with three keys: "guidance", "references", and "risk". The "risk" key's value should be an object with "level", "analysis", and "recommendation". The "recommendation" value MUST be an array of strings, each being a numbered step.`;
+        const prompt = `Analyze the following legal question for a school administrator.
+CRITICAL INSTRUCTIONS:
+1.  The 'references' field is mandatory. You MUST provide citations to real, applicable statutes (e.g., 20 U.S.C. § 1232g for FERPA) or relevant, verifiable court cases in italics (e.g., *Tinker v. Des Moines*).
+2.  The 'guidance' must be a thorough legal analysis.
+3.  The 'risk' section must provide a clear, defensible assessment.
+Format your response as a JSON object with three keys: "guidance", "references", and "risk". The "risk" key's value should be an object with "level", "analysis", and "recommendation". The "recommendation" value MUST be an array of strings, each being a numbered step.
+
+Question: "${questionText}"`;
         
         const legalResponseSchema = {
             type: "OBJECT",
@@ -1239,7 +1495,7 @@ export default function App() {
         <div className="max-w-2xl mx-auto space-y-8">
             <div className="shadow-2xl border-0" style={{ background: "#4B5C64" }}>
                 <div className="p-6" style={{ color: "#fff" }}>
-                    <SectionHeader icon={<BookOpen className="text-[#faecc4]" size={26} />} title="Handbook Analysis" />
+                    <SectionHeader icon={<BookOpen className="text-[#faecc4]" size={26} />} title="IQ Handbook" />
                     
                     <div>
                         <h3 className="text-lg font-bold mb-2" style={{ color: "#faecc4" }}>1. Review by Section</h3>
@@ -1254,7 +1510,7 @@ export default function App() {
                                     setIsSectionLanguageOpen(false);
                                 }}
                             >
-                                {handbookSections.map((s) => <option key={s.section} value={s.section}>{s.section}</option>)}
+                                {handbookSections(handleSectionLinkClick).map((s) => <option key={s.section} value={s.section}>{s.section}</option>)}
                             </select>
                         </div>
                         <div className="mb-2">
@@ -1270,7 +1526,7 @@ export default function App() {
                         )}
                         <div className="font-semibold mt-10 mb-2" style={{ color: "#FFF" }}>Potential Section Vulnerabilities</div>
                         <ul className="ml-6 text-sm list-disc">
-                            {(handbookSections.find(s => s.section === selectedSection)?.vulnerabilities || []).map((vuln, i) => (
+                            {(handbookSections(handleSectionLinkClick).find(s => s.section === selectedSection)?.vulnerabilities || []).map((vuln, i) => (
                                 <li key={i} className={`pl-1 mb-2 p-2 rounded-lg flex items-center gap-2 shadow ${vuln.source === "Industry Trend" ? "bg-yellow-100 border-l-4 border-yellow-400" : "bg-red-100 border-l-4 border-red-400"}`}>
                                     <AlertCircle size={16} className={vuln.source === "Industry Trend" ? "text-slate-600" : "text-red-600"} />
                                     <span style={{ color: "#334155" }}>{vuln.text}</span>
@@ -1282,7 +1538,7 @@ export default function App() {
                             <button
                                 className="bg-blue-700 hover:bg-blue-800 text-white font-semibold px-6 py-2 rounded-xl shadow-lg flex items-center gap-2 transition-all"
                                 onClick={() => {
-                                    const s = handbookSections.find(s => s.section === selectedSection);
+                                    const s = handbookSections(handleSectionLinkClick).find(s => s.section === selectedSection);
                                     suggestionSectionRef.current = s.section;
                                     setSuggestedUpdate(suggestedSectionLanguage[s.section] || "Clarify this policy with specific procedures.");
                                     setShowSuggestionModal(true);
@@ -1347,7 +1603,7 @@ export default function App() {
                 </div>
             </div>
             <HandbookAuditCard />
-            <HandbookVulnerabilitiesCard sections={handbookSections} />
+            <HandbookVulnerabilitiesCard sections={handbookSections} onSectionLinkClick={handleSectionLinkClick} />
         </div>
     );
 
@@ -1355,26 +1611,37 @@ export default function App() {
         <div className="max-w-2xl mx-auto space-y-8">
             <div className="shadow-2xl border-0 rounded-2xl" style={{ background: "#4B5C64", color: "#fff" }}>
                 <div className="p-6">
-                    <SectionHeader icon={<Bell className="text-[#faecc4]" size={26} />} title="All Alerts" />
+                    <SectionHeader icon={<Bell className="text-[#faecc4]" size={26} />} title="IQ Alerts" />
                        <div className="mb-6 text-white space-y-4">
                             <p><strong>Below are current alerts gathered from several direct resources.</strong></p>
-                            <p><strong>The Handbook Consideration button indicates that the subject matter is relevant to your handbook and potential changes should be considered.</strong></p>
+                            <p><strong>Click the View Source button for direct links to relevant subject matter.</strong></p>
                         </div>
                     <div className="max-h-96 overflow-y-scroll pr-2">
                         {alerts.map((a, i) => (
                             <React.Fragment key={i}>
                                 <div className="p-2 rounded-lg hover:bg-gray-700 transition-colors">
                                     <p>{a.text} <span className="text-sm text-gray-400">- {formatDate(a.date)}</span></p>
-                                    {a.hasButton && (
-                                        <div className="flex justify-start mt-2">
+                                    <div className="flex justify-start mt-2">
+                                        {a.link && (
+                                            <a
+                                                href={a.link}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-1 rounded-lg text-xs flex items-center gap-1"
+                                            >
+                                                <ExternalLink size={12} />
+                                                View Source
+                                            </a>
+                                        )}
+                                        {a.hasButton && (
                                             <button
                                                 className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-1 rounded-lg text-xs"
                                                 onClick={() => handleShowSuggestion(a)}
                                             >
                                                 Handbook Consideration
                                             </button>
-                                        </div>
-                                    )}
+                                        )}
+                                    </div>
                                 </div>
                                 {i < alerts.length - 1 && <hr className="border-gray-600 my-1" />}
                             </React.Fragment>
@@ -1389,26 +1656,37 @@ export default function App() {
         <div className="max-w-2xl mx-auto space-y-8">
             <div className="shadow-2xl border-0 rounded-2xl" style={{ background: "#4B5C64", color: "#fff" }}>
                 <div className="p-6">
-                    <SectionHeader icon={<TrendingUp className="text-[#faecc4]" size={26} />} title="Industry Trends & Legislation" />
+                    <SectionHeader icon={<TrendingUp className="text-[#faecc4]" size={26} />} title="IQ Trends" />
                     <div className="mb-6 text-white space-y-4">
                         <p><strong>Below are current industry trends and legislation articles and information gathered from several direct resources.</strong></p>
-                        <p><strong>The Handbook Consideration button indicates that the subject matter is relevant to your handbook and potential changes should be considered.</strong></p>
+                        <p><strong>Click the View Source button for direct links to relevant subject matter.</strong></p>
                     </div>
                        <div className="max-h-96 overflow-y-scroll pr-2">
                         {trends.map((t, i) => (
                             <React.Fragment key={i}>
                                 <div className="p-2 rounded-lg hover:bg-gray-700 transition-colors">
                                     <p>{t.text} <span className="text-sm text-gray-400">- {formatDate(t.date)}</span></p>
-                                    {t.hasButton && (
-                                        <div className="flex justify-start mt-2">
+                                    <div className="flex justify-start mt-2">
+                                        {t.link && (
+                                            <a
+                                                href={t.link}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-1 rounded-lg text-xs flex items-center gap-1"
+                                            >
+                                                <ExternalLink size={12} />
+                                                View Source
+                                            </a>
+                                        )}
+                                        {t.hasButton && (
                                             <button
                                                 className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-1 rounded-lg text-xs"
                                                 onClick={() => handleShowSuggestion(t)}
                                             >
                                                 Handbook Consideration
                                             </button>
-                                        </div>
-                                    )}
+                                        )}
+                                    </div>
                                 </div>
                                 {i < trends.length - 1 && <hr className="border-gray-600 my-1" />}
                             </React.Fragment>
@@ -1423,7 +1701,7 @@ export default function App() {
         <div className="max-w-2xl mx-auto space-y-8">
             <div className="shadow-2xl border-0 rounded-2xl" style={{ background: "#4B5C64", color: "#fff" }}>
                 <div className="p-6">
-                    <SectionHeader icon={<MessageCircle className="text-[#faecc4]" size={26} />} title="School Leaders Q&A" />
+                    <SectionHeader icon={<MessageCircle className="text-[#faecc4]" size={26} />} title="IQ School Leaders Q&A" />
                        <div className="mb-6 text-white font-bold space-y-2">
                             <p>Below you can ask specific questions by selecting a topic or generating your own question.</p>
                             <p>The system is connected to various leading edge LLM knowledge base networks and resources related to the industry that will generate answers immediately.</p>
@@ -1461,7 +1739,7 @@ export default function App() {
                                 {isAnalyzing && <p className="text-sm text-yellow-400 mt-2">Analyzing...</p>}
                                 {currentAnswer && (
                                      <div className="mt-3 p-3 bg-gray-800 rounded-md border-l-4 border-blue-400">
-                                         <AIContentRenderer content={currentAnswer} />
+                                         <AIContentRenderer content={currentAnswer} onSectionLinkClick={handleSectionLinkClick} />
                                      </div>
                                 )}
                             </div>
@@ -1479,7 +1757,7 @@ export default function App() {
         <div className="max-w-2xl mx-auto space-y-8">
             <div className="shadow-2xl border-0 rounded-2xl" style={{ background: "#4B5C64", color: "#fff" }}>
                 <div className="p-6">
-                    <SectionHeader icon={<Gavel className="text-[#faecc4]" size={26} />} title="Legal Guidance" />
+                    <SectionHeader icon={<Gavel className="text-[#faecc4]" size={26} />} title="IQ Legal Guidance" />
                     <div className="mb-6 text-white space-y-3">
                         <p><strong>Structured Legal Analysis:</strong> Get preliminary legal guidance on complex legal issues.</p>
                         <ul className="list-disc pl-5 space-y-1 text-sm">
@@ -1513,11 +1791,11 @@ export default function App() {
                                 <div className="space-y-4 text-sm">
                                     <div className="p-3 bg-gray-800 rounded-md border-l-4 border-blue-400">
                                         <h4 className="font-bold text-blue-300 mb-1">Legal Guidance</h4>
-                                        <p>{legalAnswer.guidance}</p>
+                                        <AIContentRenderer content={legalAnswer.guidance} onSectionLinkClick={handleSectionLinkClick} />
                                     </div>
                                     <div className="p-3 bg-gray-800 rounded-md border-l-4 border-green-400">
                                         <h4 className="font-bold text-green-300 mb-1">Key References</h4>
-                                        <p>{legalAnswer.references}</p>
+                                        <AIContentRenderer content={legalAnswer.references} onSectionLinkClick={handleSectionLinkClick} />
                                     </div>
                                     <div className={`p-3 bg-gray-800 rounded-md border-l-4 ${legalAnswer.risk.level === 'High' ? 'border-red-400' : 'border-yellow-400'}`}>
                                         <h4 className={`font-bold ${legalAnswer.risk.level === 'High' ? 'text-red-300' : 'text-yellow-300'} mb-1`}>Risk Analysis & Recommendation</h4>
@@ -1556,6 +1834,107 @@ export default function App() {
             </div>
         </div>
     );
+
+    // --- NEW: Calendar Page Component ---
+    const CALENDAR = () => {
+        const [currentDate, setCurrentDate] = useState(new Date());
+        const [events, setEvents] = useState([
+            { date: '2025-09-15', title: 'Board of Trustees Meeting' },
+            { date: '2025-10-20', title: 'NAIS Annual Conference' }
+        ]);
+        const [showEventModal, setShowEventModal] = useState(false);
+        const [selectedDate, setSelectedDate] = useState(null);
+        const [newEventTitle, setNewEventTitle] = useState("");
+
+        const daysInMonth = (month, year) => new Date(year, month + 1, 0).getDate();
+        const firstDayOfMonth = (month, year) => new Date(year, month, 1).getDay();
+
+        const handleDayClick = (day) => {
+            const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            setSelectedDate(dateStr);
+            setShowEventModal(true);
+        };
+
+        const handleSaveEvent = () => {
+            if (newEventTitle && selectedDate) {
+                setEvents([...events, { date: selectedDate, title: newEventTitle }]);
+                setShowEventModal(false);
+                setNewEventTitle("");
+                setSelectedDate(null);
+            }
+        };
+
+        const renderCalendar = () => {
+            const month = currentDate.getMonth();
+            const year = currentDate.getFullYear();
+            const numDays = daysInMonth(month, year);
+            const startDay = firstDayOfMonth(month, year);
+            const days = [];
+
+            for (let i = 0; i < startDay; i++) {
+                days.push(<div key={`empty-${i}`} className="border border-gray-200"></div>);
+            }
+
+            for (let i = 1; i <= numDays; i++) {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+                const dayEvents = events.filter(e => e.date === dateStr);
+                days.push(
+                    <div
+                        key={i}
+                        className="border border-gray-200 p-2 cursor-pointer hover:bg-blue-50 flex flex-col"
+                        onClick={() => handleDayClick(i)}
+                    >
+                        <div className="font-bold">{i}</div>
+                        <div className="mt-1 space-y-1 overflow-y-auto">
+                            {dayEvents.map((event, idx) => (
+                                <div key={idx} className="bg-blue-500 text-white text-xs rounded px-1 py-0.5">
+                                    {event.title}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                );
+            }
+            return days;
+        };
+
+        return (
+            <div className="max-w-4xl mx-auto">
+                 <h1 className="text-3xl font-bold text-center mb-6">Calendar of Important Events, Conferences & Meetings</h1>
+                 <div className="bg-white p-6 rounded-2xl shadow-2xl">
+                    <div className="flex justify-between items-center mb-4">
+                        <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() - 1)))} className="p-2 rounded-md hover:bg-gray-200"><ChevronLeft /></button>
+                        <h2 className="text-2xl font-bold">{currentDate.toLocaleString('default', { month: 'long', year: 'numeric' })}</h2>
+                        <button onClick={() => setCurrentDate(new Date(currentDate.setMonth(currentDate.getMonth() + 1)))} className="p-2 rounded-md hover:bg-gray-200"><ChevronRight /></button>
+                    </div>
+                    <div className="grid grid-cols-7 text-center font-bold text-gray-600">
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => <div key={day} className="py-2">{day}</div>)}
+                    </div>
+                    <div className="grid grid-cols-7 grid-rows-5 h-[600px]">
+                        {renderCalendar()}
+                    </div>
+                 </div>
+                 {showEventModal && (
+                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+                         <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full">
+                            <h3 className="text-xl font-bold mb-4">Add Event for {new Date(selectedDate + 'T00:00:00').toLocaleDateString()}</h3>
+                            <input
+                                type="text"
+                                value={newEventTitle}
+                                onChange={(e) => setNewEventTitle(e.target.value)}
+                                placeholder="Event Title"
+                                className="w-full p-2 border rounded-md mb-4"
+                            />
+                            <div className="flex justify-end gap-2">
+                                <button className="rounded-lg px-4 py-2 border" onClick={() => setShowEventModal(false)}>Cancel</button>
+                                <button className="bg-blue-600 text-white font-semibold px-4 py-2 rounded-lg" onClick={handleSaveEvent}>Save Event</button>
+                            </div>
+                         </div>
+                     </div>
+                 )}
+            </div>
+        );
+    };
 
 
     return (
@@ -1618,8 +1997,9 @@ export default function App() {
 
                 <main className="flex-1 p-10 overflow-y-auto bg-gray-100">
                     {page === "dashboard" && DASHBOARD}
-                    {page === "risk" && <RiskAssessmentCenter handbookText={fullHandbookText} handbookIndex={handbookSections} apiKey={GEMINI_API_KEY} />}
+                    {page === "risk" && <RiskAssessmentCenter handbookText={fullHandbookText} apiKey={GEMINI_API_KEY} handbookSectionLanguage={handbookSectionLanguage} onSectionLinkClick={handleSectionLinkClick} queryHistory={queryHistory} setQueryHistory={setQueryHistory} db={db} userId={userId} />}
                     {page === "handbook" && HANDBOOK}
+                    {page === "calendar" && <CALENDAR />}
                     {page === "alerts" && ALERTS}
                     {page === "trends" && TRENDS}
                     {page === "hosqa" && HOSQA}
@@ -1643,6 +2023,8 @@ export default function App() {
                     </div>
                 </div>
             )}
+            
+            <HandbookSectionModal section={modalSection} onClose={() => setModalSection(null)} />
         </div>
     );
 }

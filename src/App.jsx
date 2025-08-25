@@ -877,7 +877,7 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
                         className="w-full min-h-[140px] border-2 rounded-xl shadow-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-all duration-200 p-2 text-black"
                         style={{
                             background: "#fff",
-                            borderColor: "#ffd700",
+                            borderColor: "#fff",
                             boxShadow: "0 6px 32px 0 rgba(60,60,60,0.10), 0 1.5px 8px 0 rgba(60,60,60,0.08)"
                         }}
                         placeholder="Describe a new incident here or select a scenario above..."

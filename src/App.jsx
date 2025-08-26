@@ -905,7 +905,7 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
                     />
                     {/* --- Query History Dropdown Placeholder --- */}
 <div className="mt-2">
-     <label className="block font-medium text-sm mb-1">Saved Queries</label>
+     <label className="block font-medium text-sm mb-1">Saved Searches</label>
      <select
         className="w-full p-2 rounded-md text-black border-2 border-gray-300"
         onChange={(e) => {

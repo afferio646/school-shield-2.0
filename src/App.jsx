@@ -1614,6 +1614,7 @@ Question: "${questionText}"`;
                 </div>
             </div>
             <HandbookAuditCard />
+            <HandbookComparisonCard apiKey={GEMINI_API_KEY}AIzaSyCYAfKVJ9BTLWHpNLDr0bHDsvYOdWMfIpw />
             <HandbookVulnerabilitiesCard sections={handbookSections} onSectionLinkClick={handleSectionLinkClick} />
         </div>
     );

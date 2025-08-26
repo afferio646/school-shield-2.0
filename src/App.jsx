@@ -3,7 +3,7 @@ import { Bell, BookOpen, Shield, AlertCircle, TrendingUp, MessageCircle, Gavel, 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from 'firebase/firestore';
-import HandbookComparisonCard from './components/HandbookComparisonCard';
+import HandbookComparisonCard from './components/HandbookComparisonCard.jsx';
 
 // --- SECURE API KEY HANDLING ---
 // The API key is now preserved as requested.

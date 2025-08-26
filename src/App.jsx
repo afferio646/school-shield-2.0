@@ -5,11 +5,9 @@ import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged }
 import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from 'firebase/firestore';
 
 
-// --- SECURE API KEY & CONFIG HANDLING ---
-// This code is now ready for deployment. It will prioritize environment variables 
-// on Vercel but falls back to the hardcoded keys for use in this preview environment.
-const GEMINI_API_KEY = (typeof process !== 'undefined' ? process.env.REACT_APP_GEMINI_API_KEY : undefined) || "AIzaSyCYAfKVJ9BTLWHpNLDr0bHDsvYOdWMfIpw";
-const FIREBASE_CONFIG = (typeof process !== 'undefined' ? process.env.REACT_APP_FIREBASE_CONFIG : undefined) || window.__firebase_config;
+// --- SECURE API KEY HANDLING ---
+// The API key is now preserved as requested.
+const GEMINI_API_KEY = "AIzaSyCYAfKVJ9BTLWHpNLDr0bHDsvYOdWMfIpw";
 
 
 // --- Helper Components ---
@@ -647,7 +645,7 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
 
         // Live AI Call
         setViewMode('live');
-        if (!apiKey) {
+        if (!apiKey || apiKey === "PASTE_YOUR_API_KEY_HERE") {
             alert("Please provide an API key to use the live AI features.");
             setLoading(false);
             return;
@@ -866,8 +864,8 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
             <h1 className="text-3xl font-bold text-center">IQ Risk Assessment Center</h1>
             
             <div className="flex justify-center gap-2 mb-4">
-                <button onClick={() => handleScenarioButtonClick('parentComplaint')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'parentComplaint' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Parent Complaint Demo</button>
-                <button onClick={() => handleScenarioButtonClick('facultyLeave')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'facultyLeave' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Faculty Leave Demo</button>
+                <button onClick={() => handleScenarioButtonClick('parentComplaint')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'parentComplaint' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Parent Complaint Scenario</button>
+                <button onClick={() => handleScenarioButtonClick('facultyLeave')} className={`px-4 py-2 rounded-md ${selectedScenarioKey === 'facultyLeave' ? 'bg-blue-700 text-white' : 'bg-gray-300 text-black'}`}>Faculty Leave Scenario</button>
             </div>
 
             <div className="shadow-2xl border-2 border-blue-100 rounded-2xl" style={{ background: "#4B5C64" }}>
@@ -877,7 +875,7 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
                         className="w-full min-h-[140px] border-2 rounded-xl shadow-lg focus:border-blue-400 focus:ring-2 focus:ring-blue-200 transition-all duration-200 p-2 text-black"
                         style={{
                             background: "#fff",
-                            borderColor: "#fff",
+                            borderColor: "#ffd700",
                             boxShadow: "0 6px 32px 0 rgba(60,60,60,0.10), 0 1.5px 8px 0 rgba(60,60,60,0.08)"
                         }}
                         placeholder="Describe a new incident here or select a scenario above..."
@@ -927,7 +925,7 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
                             <button
                                 onClick={() => handleGenerate(false)}
                                 disabled={loading || !issue}
-                                className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue ? "bg-blue-700 cursor-not-allowed" : "bg-blue-700 hover:bg-blue-700"}`}
+                                className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
                             >
                                 {loading ? "Analyzing..." : "Analyze New Issue"}
                             </button>
@@ -935,7 +933,7 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
                         <button
                             onClick={() => handleGenerate(true)}
                             disabled={loading || !issue || !responseGenerated}
-                            className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue || !responseGenerated ? "bg-blue-700 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}
+                            className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue || !responseGenerated ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}
                         >
                              {loading ? "Analyzing..." : "Update & Analyze"}
                         </button>
@@ -1150,7 +1148,7 @@ export default function App() {
     // --- NEW: Firebase Setup and Query History Persistence ---
     useEffect(() => {
         try {
-            const firebaseConfig = JSON.parse(FIREBASE_CONFIG || '{}');
+            const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
             if (!firebaseConfig.apiKey) {
                 console.error("Firebase config is missing or invalid.");
                 return;
@@ -1515,9 +1513,8 @@ Question: "${questionText}"`;
                         </div>
                         <div className="mb-2">
                             <button className="text-lg font-bold cursor-pointer focus:outline-none" style={{ color: "#faecc4" }} onClick={() => setIsSectionLanguageOpen(open => !open)}>
-                            {selectedSection.split('. ').slice(1).join('. ')}
-                            </button>                            
-                            
+                                {selectedSection}
+                            </button>
                             <span className="ml-2 text-xs" style={{ color: "#fff" }}>(Click to show/hide full Handbook Section language)</span>
                         </div>
                         {isSectionLanguageOpen && (

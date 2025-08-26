@@ -1513,8 +1513,8 @@ Question: "${questionText}"`;
                         </div>
                         <div className="mb-2">
                             <button className="text-lg font-bold cursor-pointer focus:outline-none" style={{ color: "#faecc4" }} onClick={() => setIsSectionLanguageOpen(open => !open)}>
-                                {selectedSection}
-                            </button>
+                            {selectedSection.split('. ').slice(1).join('. ')}
+                            </button>                                
                             <span className="ml-2 text-xs" style={{ color: "#fff" }}>(Click to show/hide full Handbook Section language)</span>
                         </div>
                         {isSectionLanguageOpen && (

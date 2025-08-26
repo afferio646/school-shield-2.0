@@ -925,7 +925,7 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
                             <button
                                 onClick={() => handleGenerate(false)}
                                 disabled={loading || !issue}
-                                className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
+                                className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue ? "bg-blue-700 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
                             >
                                 {loading ? "Analyzing..." : "Analyze New Issue"}
                             </button>
@@ -933,7 +933,7 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
                         <button
                             onClick={() => handleGenerate(true)}
                             disabled={loading || !issue || !responseGenerated}
-                            className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue || !responseGenerated ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}
+                            className={`px-6 py-2 text-lg font-semibold text-white rounded-md shadow-md transition-colors ${loading || !issue || !responseGenerated ? "bg-blue-700 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}
                         >
                              {loading ? "Analyzing..." : "Update & Analyze"}
                         </button>

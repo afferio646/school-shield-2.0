@@ -469,6 +469,13 @@ function ReportViewerModal({ report, scenarios, onClose, onSectionLinkClick }) {
 function ArchivedReportsCard({ reports, onViewReport }) {
     const [isOpen, setIsOpen] = useState(false);
 
+    // Placeholder function for the upload button
+    const handleUploadClick = (e, reportId) => {
+        e.stopPropagation(); // Prevents the report from opening when you click upload
+        console.log(`Upload button clicked for report ID: ${reportId}`);
+        // You can trigger a file input click here or open a modal
+    };
+
     return (
         <div className="shadow-2xl border-0 rounded-2xl mt-6" style={{ background: "#4B5C64" }}>
             <div className="p-6" style={{ color: "#fff" }}>
@@ -486,11 +493,22 @@ function ArchivedReportsCard({ reports, onViewReport }) {
                         {reports.length > 0 ? reports.map(report => (
                             <div
                                 key={report.id}
-                                className="p-3 bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-600"
-                                onClick={() => onViewReport(report)}
+                                className="p-3 bg-gray-700 rounded-lg flex items-center justify-between"
                             >
-                                <p className="font-semibold">{report.title}</p>
-                                <p className="text-xs text-gray-400">Date: {report.date}</p>
+                                <div 
+                                    className="flex-grow cursor-pointer"
+                                    onClick={() => onViewReport(report)}
+                                >
+                                    <p className="font-semibold">{report.title}</p>
+                                    <p className="text-xs text-gray-400">Date: {report.date}</p>
+                                </div>
+                                <button
+                                    onClick={(e) => handleUploadClick(e, report.id)}
+                                    className="ml-4 bg-green-600 hover:bg-green-700 text-white font-semibold px-3 py-1 rounded-lg text-xs flex items-center gap-1"
+                                >
+                                    <Archive size={12} />
+                                    Upload
+                                </button>
                             </div>
                         )) : <p>No reports archived yet.</p>}
                     </div>
@@ -499,7 +517,6 @@ function ArchivedReportsCard({ reports, onViewReport }) {
         </div>
     );
 }
-
 
 // --- Page Components ---
 

@@ -903,31 +903,28 @@ function RiskAssessmentCenter({ handbookText, apiKey, handbookSectionLanguage, o
                             setViewMode('live');
                         }}
                     />
-                    {/* --- NEW: Query History Dropdown --- */}
-                    {queryHistory.length > 0 && (
-                        <div className="mt-2">
-                             <label className="block font-medium text-sm mb-1">Saved Queries</label>
-                             <select
-                                className="w-full p-2 rounded-md text-black border-2 border-gray-300"
-                                onChange={(e) => {
-                                    if(e.target.value) {
-                                        setIssue(e.target.value);
-                                        setResponseGenerated(false);
-                                        setGeneratedSteps(null);
-                                        setOpenSteps({});
-                                        setViewMode('live');
-                                        setSelectedScenarioKey(null);
-                                    }
-                                }}
-                                value="" // Controlled component needs a value, empty string for placeholder
-                             >
-                                <option value="">Select a past query to load...</option>
-                                {queryHistory.map((q, i) => (
-                                    <option key={i} value={q}>{q.substring(0, 100)}{q.length > 100 ? '...' : ''}</option>
-                                ))}
-                             </select>
-                        </div>
-                    )}
+                    {/* --- Query History Dropdown Placeholder --- */}
+<div className="mt-2">
+     <label className="block font-medium text-sm mb-1">Saved Queries</label>
+     <select
+        className="w-full p-2 rounded-md text-black border-2 border-gray-300"
+        onChange={(e) => {
+            if(e.target.value) {
+                // This is where you would load the selected query
+                console.log("Selected query:", e.target.value);
+            }
+        }}
+        value=""
+     >
+        <option value="">Select a past query to load...</option>
+        <option value="Parent complaint about unfair suspension without notice">
+            Parent complaint about unfair suspension...
+        </option>
+        <option value="Non-renewed faculty member wants to use sick days as vacation before departure.">
+            Non-renewed faculty member wants to use sick days...
+        </option>
+     </select>
+</div>
 
                     {/* --- UPDATED: Button Group --- */}
                     <div className="flex justify-center gap-4 mt-4">
